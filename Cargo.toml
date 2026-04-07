@@ -3,6 +3,18 @@ name = "ygg-peer-checker"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata.deb]
+maintainer = "mike"
+copyright = "2025, mike"
+license-file = ["LICENSE", "0"]
+depends = "$auto"
+section = "utility"
+priority = "optional"
+assets = [
+    ["target/release/ygg-peer-checker", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/ygg-peer-checker/README", "644"],
+]
+
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
