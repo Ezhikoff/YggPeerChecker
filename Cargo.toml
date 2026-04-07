@@ -1,0 +1,16 @@
+[package]
+name = "ygg-peer-checker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+iced = { version = "0.13", features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
+quinn = "0.11"
+rustls = "0.23"
+tokio-rustls = "0.26"
+rcgen = "0.13"
+webpki-roots = "0.26"
+futures = "0.3"
+chrono = "0.4"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
