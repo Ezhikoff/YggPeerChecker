@@ -3,6 +3,9 @@ name = "ygg-peer-checker"
 version = "0.1.0"
 edition = "2021"
 
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [dependencies]
 iced = { version = "0.13", features = ["tokio"] }
 tokio = { version = "1", features = ["full"] }

@@ -1,7 +1,8 @@
 use iced::widget::{
-    button, column, container, pick_list, row, text, text_input, Column, Container, Scrollable,
-    Space,
+    button, column, container, pick_list, row, text, text_editor, Column, Container,
+    Scrollable, Space,
 };
+use iced::widget::text_editor::Action;
 use iced::{Alignment, Background, Border, Color, Element, Length, Task, Theme};
 use tokio::io::AsyncWriteExt;
 
@@ -168,7 +169,7 @@ fn text_style(color: Color) -> impl Fn(&Theme) -> text::Style {
 
 #[derive(Debug, Clone)]
 enum Message {
-    InputChanged(String),
+    EditorAction(Action),
     AddPeer,
     CheckAll,
     CheckDone(Vec<PeerEntry>),
@@ -178,7 +179,7 @@ enum Message {
 }
 
 struct YggPeerChecker {
-    input: String,
+    content: iced::widget::text_editor::Content,
     peers: Vec<PeerEntry>,
     checking: bool,
     sort_by: SortBy,
@@ -193,7 +194,7 @@ impl Default for YggPeerChecker {
 impl YggPeerChecker {
     fn new() -> Self {
         Self {
-            input: String::new(),
+            content: iced::widget::text_editor::Content::new(),
             peers: Vec::new(),
             checking: false,
             sort_by: SortBy::Order,
@@ -206,12 +207,13 @@ impl YggPeerChecker {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::InputChanged(value) => {
-                self.input = value;
+            Message::EditorAction(action) => {
+                self.content.perform(action);
                 Task::none()
             }
             Message::AddPeer => {
-                let lines: Vec<&str> = self.input.lines().collect();
+                let text = self.content.text();
+                let lines: Vec<&str> = text.lines().collect();
                 for line in lines {
                     if let Some(peer) = Peer::parse(line) {
                         self.peers.push(PeerEntry {
@@ -220,7 +222,7 @@ impl YggPeerChecker {
                         });
                     }
                 }
-                self.input.clear();
+                self.content = iced::widget::text_editor::Content::new();
                 Task::none()
             }
             Message::CheckAll => {
@@ -271,14 +273,21 @@ impl YggPeerChecker {
         // Поле ввода
         let input_area = column![
             text("Добавить пиры (по одному на строку):").size(14),
-            text_input(
-                "tcp://89.44.86.85:65535\nquic://[2a09:5302:ffff::132a]:65535",
-                &self.input
+            Container::new(
+                text_editor(&self.content)
+                    .on_action(Message::EditorAction)
+                    .padding([6, 10])
+                    .size(13),
             )
-            .on_input(Message::InputChanged)
-            .on_submit(Message::AddPeer)
-            .size(14)
-            .padding(8),
+            .height(Length::Fixed(120.0))
+            .style(|_theme: &Theme| container::Style {
+                border: Border {
+                    color: Color::from_rgb(0.3, 0.3, 0.3),
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }),
             row![
                 button(text("Добавить").size(13))
                     .padding([6, 16])
@@ -834,5 +843,6 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 
 fn main() -> iced::Result {
     iced::application(YggPeerChecker::title, YggPeerChecker::update, YggPeerChecker::view)
+        .window_size((900.0, 680.0))
         .run()
 }
