@@ -1,8 +1,11 @@
+#![windows_subsystem = "windows"]
+
 use iced::widget::{
     button, column, container, pick_list, row, text, text_editor, Column, Container,
     Scrollable, Space,
 };
 use iced::widget::text_editor::Action;
+use iced::window;
 use iced::{Alignment, Background, Border, Color, Element, Length, Task, Theme};
 use tokio::io::AsyncWriteExt;
 
@@ -199,10 +202,6 @@ impl YggPeerChecker {
             checking: false,
             sort_by: SortBy::Order,
         }
-    }
-
-    fn title(&self) -> String {
-        String::from("YggPeerChecker - Проверка пиров Yggdrasil")
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -408,13 +407,13 @@ impl YggPeerChecker {
 
         let content = column![
             header,
-            Space::with_height(16),
+            Space::new().height(16),
             input_area,
-            Space::with_height(12),
+            Space::new().height(12),
             sort_row,
-            Space::with_height(8),
+            Space::new().height(8),
             peers_list,
-            Space::with_height(8),
+            Space::new().height(8),
             stats,
         ]
         .spacing(8)
@@ -842,7 +841,18 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 // ── Точка входа ─────────────────────────────────────────────────────────
 
 fn main() -> iced::Result {
-    iced::application(YggPeerChecker::title, YggPeerChecker::update, YggPeerChecker::view)
+    iced::application(YggPeerChecker::new, YggPeerChecker::update, YggPeerChecker::view)
+        .title("YggPeerChecker - Проверка пиров Yggdrasil")
+        .window(window::Settings {
+            icon: Some(
+                window::icon::from_file_data(
+                    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/app.ico")),
+                    None,
+                )
+                .expect("icon file should be reachable and in ICO file format"),
+            ),
+            ..Default::default()
+        })
         .window_size((900.0, 680.0))
         .run()
 }
