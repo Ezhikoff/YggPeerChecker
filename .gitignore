@@ -28,3 +28,6 @@ src/icon.rs
 # Added by cargo
 
 /target
+
+# Qwen Code project context
+QWEN.md
