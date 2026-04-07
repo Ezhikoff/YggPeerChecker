@@ -1,5 +1,8 @@
 # YggPeerChecker / Проверка пиров Yggdrasil
 
+[![GitHub release](https://img.shields.io/github/release/Ezhikoff/YggPeerChecker.svg?label=latest%20release)](https://github.com/Ezhikoff/YggPeerChecker/releases/latest)
+[![License](https://img.shields.io/github/license/Ezhikoff/YggPeerChecker.svg)](https://github.com/Ezhikoff/YggPeerChecker/blob/main/LICENSE)
+
 **EN:** A GUI utility for checking, sorting, and monitoring Yggdrasil Network peers.  
 **RU:** Утилита с графическим интерфейсом для проверки, сортировки и мониторинга пиров сети Yggdrasil.
 
