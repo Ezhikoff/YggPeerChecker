@@ -1,7 +1,7 @@
 # YggPeerChecker
 
 [![Rust](https://github.com/Ezhikoff/YggPeerChecker/actions/workflows/rust.yml/badge.svg)](https://github.com/Ezhikoff/YggPeerChecker/actions/workflows/rust.yml)
-[![GitHub tag](https://img.shields.io/github/v/tag/Ezhikoff/YggPeerChecker.svg?label=latest%20tag)](https://github.com/Ezhikoff/YggPeerChecker/tags)
+[![Release](https://img.shields.io/github/v/release/Ezhikoff/YggPeerChecker.svg?label=release)](https://github.com/Ezhikoff/YggPeerChecker/releases)
 [![License](https://img.shields.io/github/license/Ezhikoff/YggPeerChecker.svg)](https://github.com/Ezhikoff/YggPeerChecker/blob/main/LICENSE)
 
 A GUI utility for checking, sorting, and monitoring Yggdrasil Network peers.
