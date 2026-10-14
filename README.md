@@ -1,10 +1,11 @@
-# YggPeerChecker / Проверка пиров Yggdrasil
+# YggPeerChecker
 
 [![GitHub tag](https://img.shields.io/github/v/tag/Ezhikoff/YggPeerChecker.svg?label=latest%20tag)](https://github.com/Ezhikoff/YggPeerChecker/tags)
 [![License](https://img.shields.io/github/license/Ezhikoff/YggPeerChecker.svg)](https://github.com/Ezhikoff/YggPeerChecker/blob/main/LICENSE)
 
-**EN:** A GUI utility for checking, sorting, and monitoring Yggdrasil Network peers.  
-**RU:** Утилита с графическим интерфейсом для проверки, сортировки и мониторинга пиров сети Yggdrasil.
+A GUI utility for checking, sorting, and monitoring Yggdrasil Network peers.
+
+Утилита с графическим интерфейсом для проверки, сортировки и мониторинга пиров сети Yggdrasil.
 
 ---
 
@@ -13,9 +14,12 @@
 | EN | RU |
 |----|----|
 | Support for 8 protocols | Поддержка 8 протоколов |
+| **Parallel peer checking** | **Параллельная проверка пиров** |
 | Measure ping & connection speed | Измерение пинга и скорости подключения |
 | Color-coded peer status | Цветовая индикация статуса пиров |
 | Sort by ping, speed, or status | Сортировка по пингу, скорости или статусу |
+| **Auto-refresh timer (30s / 1min / 5min / 10min)** | **Автообновление (30с / 1мин / 5мин / 10мин)** |
+| **Save/load peer list to file** | **Сохранение/загрузка списка пиров в файл** |
 | Add/remove peers dynamically | Динамическое добавление/удаление пиров |
 | Real-time online/offline/pending stats | Статистика онлайн/офлайн/ожидание в реальном времени |
 | Cross-platform (Windows, Linux) | Кроссплатформенность (Windows, Linux) |
@@ -65,6 +69,19 @@ tls://[2a09:5302:ffff::132a]:65535
 
 ---
 
+## Save/Load / Сохранение и загрузка
+
+Peer list is saved to a config file and auto-loaded on startup.
+
+Список пиров сохраняется в конфигурационный файл и автоматически загружается при запуске.
+
+| Platform / Платформа | Path / Путь |
+|---------------------|-------------|
+| **Linux** | `~/.config/ygg-peer-checker/peers.txt` |
+| **Windows** | `%APPDATA%\ygg-peer-checker\peers.txt` |
+
+---
+
 ## Build & Run / Сборка и запуск
 
 ### Requirements / Требования
@@ -84,53 +101,41 @@ cargo build --release
 cargo run --release
 ```
 
-**Windows (PowerShell):**
-```powershell
-cd C:\path\to\YggPeerChecker
-cargo run --release
-```
-
-**Linux (WSL or native):**
-```bash
-cd /home/mike/DEV/YggPeerChecker
-./target/release/ygg-peer-checker
-```
-
 ### Output binary / Исполняемый файл
 
 | Platform / Платформа | Path / Путь |
 |---------------------|-------------|
-| **Linux** | `target/release/ygg-peer-checker` (ELF, ~23MB) |
+| **Linux** | `target/release/ygg-peer-checker` |
 | **Windows** | `target\release\ygg-peer-checker.exe` |
-
-> **Note / Примечание:** If you built the project in WSL, the Linux binary will not run on Windows. Build from Windows PowerShell to get the `.exe`.  
-> Если проект был собран в WSL, Linux-бинарник не запустится на Windows. Соберите из PowerShell Windows, чтобы получить `.exe`.
 
 ---
 
 ## Usage / Использование
 
-1. **EN:** Paste peer URLs (one per line) into the text field → Click **"Добавить / Add"**  
-   **RU:** Вставьте URL пиров (по одному на строку) в текстовое поле → Нажмите **"Добавить / Add"**
+1. Paste peer URLs (one per line) into the text field → Click **"Добавить"**
+   Вставьте URL пиров (по одному на строку) в текстовое поле → Нажмите **"Добавить"**
 
-2. **EN:** Click **"Проверить все / Check All"** to start checking  
-   **RU:** Нажмите **"Проверить все / Check All"** для начала проверки
+2. Click **"Проверить все"** to start parallel checking
+   Нажмите **"Проверить все"** для начала параллельной проверки
 
-3. **EN:** Use the **"Сортировка / Sort"** dropdown to sort by ping, speed, or status  
-   **RU:** Используйте выпадающий список **"Сортировка / Sort"** для сортировки по пингу, скорости или статусу
+3. Use **"Сортировка"** dropdown to sort by ping, speed, or status
+   Используйте **"Сортировка"** для сортировки по пингу, скорости или статусу
 
-4. **EN:** Green = fast peers, Red = unreachable  
-   **RU:** Зелёный = быстрые пиры, Красный = недоступные
+4. Enable **"Автообновление"** for automatic periodic re-checking
+   Включите **"Автообновление"** для автоматической периодической перепроверки
+
+5. Use **"Сохранить"** / **"Загрузить"** to persist the peer list
+   Используйте **"Сохранить"** / **"Загрузить"** для сохранения списка пиров
 
 ---
 
 ## Tech Stack / Технологии
 
-- **GUI:** [iced](https://github.com/iced-rs/iced) 0.13 — native cross-platform GUI
+- **GUI:** [iced](https://github.com/iced-rs/iced) 0.14 — native cross-platform GUI
 - **Async runtime:** [tokio](https://github.com/tokio-rs/tokio)
 - **QUIC:** [quinn](https://github.com/quinn-rs/quinn) 0.11
 - **TLS:** [rustls](https://github.com/rustls/rustls) 0.23
-- **WebSocket:** [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite)
+- **WebSocket:** [tokio-tungstenite](https://github.com/snapview/tokio-tungstenite) 0.30
 
 ---
 

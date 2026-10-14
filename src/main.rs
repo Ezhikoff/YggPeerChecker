@@ -1,5 +1,3 @@
-#![windows_subsystem = "windows"]
-
 use iced::widget::{
     button, column, container, pick_list, row, text, text_editor, Column, Container,
     Scrollable, Space,
@@ -7,6 +5,7 @@ use iced::widget::{
 use iced::widget::text_editor::Action;
 use iced::window;
 use iced::{Alignment, Background, Border, Color, Element, Length, Task, Theme};
+use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
 
 // ── Модели ──────────────────────────────────────────────────────────────
@@ -160,12 +159,102 @@ impl std::fmt::Display for SortBy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RefreshInterval {
+    Sec30,
+    Sec60,
+    Min5,
+    Min10,
+}
+
+impl RefreshInterval {
+    fn duration(&self) -> std::time::Duration {
+        match self {
+            RefreshInterval::Sec30 => std::time::Duration::from_secs(30),
+            RefreshInterval::Sec60 => std::time::Duration::from_secs(60),
+            RefreshInterval::Min5 => std::time::Duration::from_secs(300),
+            RefreshInterval::Min10 => std::time::Duration::from_secs(600),
+        }
+    }
+}
+
+impl std::fmt::Display for RefreshInterval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshInterval::Sec30 => write!(f, "30 сек"),
+            RefreshInterval::Sec60 => write!(f, "1 мин"),
+            RefreshInterval::Min5 => write!(f, "5 мин"),
+            RefreshInterval::Min10 => write!(f, "10 мин"),
+        }
+    }
+}
+
+// ── Общие TLS-конфиги ──────────────────────────────────────────────────
+
+fn tls_connector() -> &'static tokio_rustls::TlsConnector {
+    static INSTANCE: OnceLock<tokio_rustls::TlsConnector> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        tokio_rustls::TlsConnector::from(Arc::new(config))
+    })
+}
+
+fn wss_tls_config() -> &'static Arc<rustls::ClientConfig> {
+    static INSTANCE: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        Arc::new(
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
+                .with_no_client_auth(),
+        )
+    })
+}
+
 // ── Стили текста ────────────────────────────────────────────────────────
 
 fn text_style(color: Color) -> impl Fn(&Theme) -> text::Style {
     move |_| text::Style {
         color: Some(color),
     }
+}
+
+// ── Файл конфигурации ──────────────────────────────────────────────────
+
+fn config_path() -> std::path::PathBuf {
+    let dir = if cfg!(windows) {
+        std::path::PathBuf::from(std::env::var("APPDATA").unwrap_or_else(|_| ".".into()))
+            .join("ygg-peer-checker")
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(home)
+            .join(".config")
+            .join("ygg-peer-checker")
+    };
+    dir.join("peers.txt")
+}
+
+fn save_peers_to_file(peers: &[PeerEntry]) -> Result<(), String> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content: String = peers
+        .iter()
+        .map(|e| e.peer.raw.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+fn load_peers_from_file() -> Result<Vec<Peer>, String> {
+    let path = config_path();
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok(content.lines().filter_map(|line| Peer::parse(line)).collect())
 }
 
 // ── Приложение ──────────────────────────────────────────────────────────
@@ -179,6 +268,11 @@ enum Message {
     ClearResults,
     SortChanged(SortBy),
     RemovePeer(usize),
+    ToggleAutoRefresh,
+    RefreshIntervalChanged(RefreshInterval),
+    AutoRefreshTick,
+    SavePeers,
+    LoadPeers,
 }
 
 struct YggPeerChecker {
@@ -186,6 +280,9 @@ struct YggPeerChecker {
     peers: Vec<PeerEntry>,
     checking: bool,
     sort_by: SortBy,
+    auto_refresh: bool,
+    refresh_interval: RefreshInterval,
+    status_msg: Option<(String, bool)>,
 }
 
 impl Default for YggPeerChecker {
@@ -196,24 +293,40 @@ impl Default for YggPeerChecker {
 
 impl YggPeerChecker {
     fn new() -> Self {
-        Self {
+        let mut app = Self {
             content: iced::widget::text_editor::Content::new(),
             peers: Vec::new(),
             checking: false,
             sort_by: SortBy::Order,
+            auto_refresh: false,
+            refresh_interval: RefreshInterval::Sec60,
+            status_msg: None,
+        };
+        if let Ok(peers) = load_peers_from_file() {
+            let count = peers.len();
+            for peer in peers {
+                app.peers.push(PeerEntry {
+                    peer,
+                    status: PeerStatus::Pending,
+                });
+            }
+            if count > 0 {
+                app.status_msg = Some((format!("Загружено пиров: {}", count), false));
+            }
         }
+        app
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::EditorAction(action) => {
                 self.content.perform(action);
+                self.status_msg = None;
                 Task::none()
             }
             Message::AddPeer => {
                 let text = self.content.text();
-                let lines: Vec<&str> = text.lines().collect();
-                for line in lines {
+                for line in text.lines() {
                     if let Some(peer) = Peer::parse(line) {
                         self.peers.push(PeerEntry {
                             peer,
@@ -222,6 +335,7 @@ impl YggPeerChecker {
                     }
                 }
                 self.content = iced::widget::text_editor::Content::new();
+                self.status_msg = None;
                 Task::none()
             }
             Message::CheckAll => {
@@ -229,22 +343,28 @@ impl YggPeerChecker {
                     return Task::none();
                 }
                 self.checking = true;
+                self.status_msg = None;
                 for entry in &mut self.peers {
                     entry.status = PeerStatus::Checking;
                 }
                 let peers: Vec<Peer> = self.peers.iter().map(|e| e.peer.clone()).collect();
-
                 Task::perform(check_peers(peers), Message::CheckDone)
             }
             Message::CheckDone(entries) => {
                 self.peers = entries;
                 self.checking = false;
-                Task::none()
+                if self.auto_refresh && !self.peers.is_empty() {
+                    let interval = self.refresh_interval.duration();
+                    Task::perform(tokio::time::sleep(interval), |_| Message::AutoRefreshTick)
+                } else {
+                    Task::none()
+                }
             }
             Message::ClearResults => {
                 for entry in &mut self.peers {
                     entry.status = PeerStatus::Pending;
                 }
+                self.status_msg = None;
                 Task::none()
             }
             Message::SortChanged(sort_by) => {
@@ -252,7 +372,63 @@ impl YggPeerChecker {
                 Task::none()
             }
             Message::RemovePeer(index) => {
-                self.peers.remove(index);
+                if index < self.peers.len() {
+                    self.peers.remove(index);
+                }
+                Task::none()
+            }
+            Message::ToggleAutoRefresh => {
+                self.auto_refresh = !self.auto_refresh;
+                if self.auto_refresh && !self.checking && !self.peers.is_empty() {
+                    self.update(Message::CheckAll)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::RefreshIntervalChanged(interval) => {
+                self.refresh_interval = interval;
+                Task::none()
+            }
+            Message::AutoRefreshTick => {
+                if self.auto_refresh && !self.checking && !self.peers.is_empty() {
+                    self.update(Message::CheckAll)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::SavePeers => {
+                match save_peers_to_file(&self.peers) {
+                    Ok(()) => {
+                        let path = config_path();
+                        self.status_msg =
+                            Some((format!("Сохранено: {}", path.display()), false));
+                    }
+                    Err(e) => {
+                        self.status_msg =
+                            Some((format!("Ошибка сохранения: {}", e), true));
+                    }
+                }
+                Task::none()
+            }
+            Message::LoadPeers => {
+                match load_peers_from_file() {
+                    Ok(peers) => {
+                        let count = peers.len();
+                        self.peers.clear();
+                        for peer in peers {
+                            self.peers.push(PeerEntry {
+                                peer,
+                                status: PeerStatus::Pending,
+                            });
+                        }
+                        self.status_msg =
+                            Some((format!("Загружено пиров: {}", count), false));
+                    }
+                    Err(e) => {
+                        self.status_msg =
+                            Some((format!("Ошибка загрузки: {}", e), true));
+                    }
+                }
                 Task::none()
             }
         }
@@ -305,6 +481,16 @@ impl YggPeerChecker {
                 button(text("Сбросить").size(13))
                     .padding([6, 16])
                     .on_press(Message::ClearResults),
+                button(text("Сохранить").size(13))
+                    .padding([6, 16])
+                    .on_press_maybe(if !self.peers.is_empty() {
+                        Some(Message::SavePeers)
+                    } else {
+                        None
+                    }),
+                button(text("Загрузить").size(13))
+                    .padding([6, 16])
+                    .on_press(Message::LoadPeers),
             ]
             .spacing(8)
             .align_y(Alignment::Center),
@@ -315,7 +501,33 @@ impl YggPeerChecker {
         let sort_options = vec![SortBy::Order, SortBy::Ping, SortBy::Speed, SortBy::Status];
         let sort_row = row![
             text("Сортировка:").size(13),
-            pick_list(sort_options, Some(&self.sort_by), Message::SortChanged).width(Length::Fixed(130.0)),
+            pick_list(sort_options, Some(&self.sort_by), Message::SortChanged)
+                .width(Length::Fixed(130.0)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        // Автообновление
+        let auto_refresh_row = row![
+            button(if self.auto_refresh {
+                text("⏸ Автообновление: Вкл").size(13)
+            } else {
+                text("▶ Автообновление: Выкл").size(13)
+            })
+            .padding([6, 16])
+            .on_press(Message::ToggleAutoRefresh),
+            text("Интервал:").size(13),
+            pick_list(
+                vec![
+                    RefreshInterval::Sec30,
+                    RefreshInterval::Sec60,
+                    RefreshInterval::Min5,
+                    RefreshInterval::Min10,
+                ],
+                Some(&self.refresh_interval),
+                Message::RefreshIntervalChanged,
+            )
+            .width(Length::Fixed(100.0)),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -405,12 +617,14 @@ impl YggPeerChecker {
         ]
         .spacing(12);
 
-        let content = column![
+        let mut content = column![
             header,
             Space::new().height(16),
             input_area,
             Space::new().height(12),
             sort_row,
+            Space::new().height(8),
+            auto_refresh_row,
             Space::new().height(8),
             peers_list,
             Space::new().height(8),
@@ -419,26 +633,39 @@ impl YggPeerChecker {
         .spacing(8)
         .padding(20);
 
+        if let Some((msg, is_error)) = &self.status_msg {
+            let color = if *is_error {
+                Color::from_rgb(0.8, 0.2, 0.2)
+            } else {
+                Color::from_rgb(0.2, 0.7, 0.2)
+            };
+            content = content.push(text(msg).size(12).style(text_style(color)));
+        }
+
         container(content).into()
     }
 }
 
 fn status_badge(label: &str, color: Color, count: usize) -> Container<'_, Message> {
     let badge = row![
-        text("").width(Length::Fixed(10.0)).style(text_style(color)),
+        text("")
+            .width(Length::Fixed(10.0))
+            .style(text_style(color)),
         text(format!("{}: {}", label, count)).size(13),
     ]
     .spacing(6)
     .align_y(Alignment::Center);
 
-    container(badge).padding([4, 10]).style(move |_theme: &Theme| container::Style {
-        border: Border {
-            color,
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
-    })
+    container(badge)
+        .padding([4, 10])
+        .style(move |_theme: &Theme| container::Style {
+            border: Border {
+                color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
 }
 
 fn peer_row(entry: &PeerEntry, index: usize) -> Element<'_, Message> {
@@ -449,7 +676,7 @@ fn peer_row(entry: &PeerEntry, index: usize) -> Element<'_, Message> {
             } else if *ping_ms < 300 {
                 Color::from_rgb(0.5, 0.8, 0.0) // Жёлто-зелёный — хороший
             } else {
-                Color::from_rgb(0.8, 0.8, 0.0) // Жёлтый — приёмлемый
+                Color::from_rgb(0.8, 0.8, 0.0) // Жёлтый — приемлемый
             }
         }
         PeerStatus::Offline { .. } => Color::from_rgb(0.8, 0.0, 0.0), // Красный — офлайн
@@ -458,8 +685,14 @@ fn peer_row(entry: &PeerEntry, index: usize) -> Element<'_, Message> {
     };
 
     let status_text = match &entry.status {
-        PeerStatus::Online { ping_ms, speed_mbps } => {
-            format!("Пинг: {}мс | Скорость: {:.2} Мбит/с", ping_ms, speed_mbps)
+        PeerStatus::Online {
+            ping_ms,
+            speed_mbps,
+        } => {
+            format!(
+                "Пинг: {}мс | Скорость: {:.2} Мбит/с",
+                ping_ms, speed_mbps
+            )
         }
         PeerStatus::Offline { error } => format!("Ошибка: {}", error),
         PeerStatus::Checking => "Проверка...".to_string(),
@@ -482,7 +715,9 @@ fn peer_row(entry: &PeerEntry, index: usize) -> Element<'_, Message> {
     });
 
     let addr_text = text(&entry.peer.raw).size(13);
-    let status_text = text(status_text).size(12).style(text_style(status_color));
+    let status_text = text(status_text)
+        .size(12)
+        .style(text_style(status_color));
 
     let remove_btn = button(text("✕").size(12))
         .padding([2, 8])
@@ -519,23 +754,21 @@ fn peer_row(entry: &PeerEntry, index: usize) -> Element<'_, Message> {
 // ── Логика проверки пиров ──────────────────────────────────────────────
 
 async fn check_peers(peers: Vec<Peer>) -> Vec<PeerEntry> {
-    let mut results = Vec::new();
-
-    for peer in peers {
+    futures::future::join_all(peers.into_iter().map(|peer| async move {
         let status = check_peer(&peer).await;
-        results.push(PeerEntry {
-            peer,
-            status,
-        });
-    }
-
-    results
+        PeerEntry { peer, status }
+    }))
+    .await
 }
 
 async fn check_peer(peer: &Peer) -> PeerStatus {
     let socket_addr = match peer.socket_addr() {
         Some(addr) => addr,
-        None => return PeerStatus::Offline { error: "Неверный адрес".to_string() },
+        None => {
+            return PeerStatus::Offline {
+                error: "Неверный адрес".to_string(),
+            }
+        }
     };
 
     match peer.protocol {
@@ -556,7 +789,8 @@ async fn check_tcp(socket_addr: std::net::SocketAddr) -> PeerStatus {
     let start = std::time::Instant::now();
 
     let timeout = tokio::time::Duration::from_secs(3);
-    let result = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(socket_addr)).await;
+    let result =
+        tokio::time::timeout(timeout, tokio::net::TcpStream::connect(socket_addr)).await;
 
     let ping_ms = start.elapsed().as_millis();
 
@@ -581,8 +815,11 @@ async fn measure_speed_tcp(socket_addr: std::net::SocketAddr) -> f64 {
     let start = std::time::Instant::now();
     let mut total_bytes = 0u64;
 
-    if let Ok(Ok(mut stream)) =
-        tokio::time::timeout(tokio::time::Duration::from_secs(1), tokio::net::TcpStream::connect(socket_addr)).await
+    if let Ok(Ok(mut stream)) = tokio::time::timeout(
+        tokio::time::Duration::from_secs(1),
+        tokio::net::TcpStream::connect(socket_addr),
+    )
+    .await
     {
         let test_data = vec![0u8; 8192];
 
@@ -610,33 +847,32 @@ async fn measure_speed_tcp(socket_addr: std::net::SocketAddr) -> f64 {
 // ── TLS проверка ──────────────────────────────────────────────────────
 
 async fn check_tls(socket_addr: std::net::SocketAddr) -> PeerStatus {
-    use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-    use std::sync::Arc;
-
     let start = std::time::Instant::now();
 
-    let mut root_store = RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-    let config = ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+    let connector = tls_connector().clone();
 
     let timeout = tokio::time::Duration::from_secs(3);
-    let tcp_result = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(socket_addr)).await;
+    let tcp_result =
+        tokio::time::timeout(timeout, tokio::net::TcpStream::connect(socket_addr)).await;
 
     let tcp_stream = match tcp_result {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return PeerStatus::Offline { error: e.to_string() },
-        Err(_) => return PeerStatus::Offline { error: "Таймаут TCP".to_string() },
+        Err(_) => {
+            return PeerStatus::Offline {
+                error: "Таймаут TCP".to_string(),
+            }
+        }
     };
 
     let domain = socket_addr.ip().to_string();
     let dns_name = match rustls::pki_types::ServerName::try_from(domain) {
         Ok(n) => n,
-        Err(_) => return PeerStatus::Offline { error: "Неверное имя сервера".to_string() },
+        Err(_) => {
+            return PeerStatus::Offline {
+                error: "Неверное имя сервера".to_string(),
+            }
+        }
     };
 
     let tls_result = tokio::time::timeout(timeout, connector.connect(dns_name, tcp_stream)).await;
@@ -648,8 +884,12 @@ async fn check_tls(socket_addr: std::net::SocketAddr) -> PeerStatus {
             ping_ms,
             speed_mbps: 0.0,
         },
-        Ok(Err(e)) => PeerStatus::Offline { error: format!("TLS ошибка: {}", e) },
-        Err(_) => PeerStatus::Offline { error: "Таймаут TLS handshake".to_string() },
+        Ok(Err(e)) => PeerStatus::Offline {
+            error: format!("TLS ошибка: {}", e),
+        },
+        Err(_) => PeerStatus::Offline {
+            error: "Таймаут TLS handshake".to_string(),
+        },
     }
 }
 
@@ -657,7 +897,6 @@ async fn check_tls(socket_addr: std::net::SocketAddr) -> PeerStatus {
 
 async fn check_ws(socket_addr: std::net::SocketAddr, use_tls: bool) -> PeerStatus {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    use tokio_tungstenite::Connector;
 
     let start = std::time::Instant::now();
     let scheme = if use_tls { "wss" } else { "ws" };
@@ -665,34 +904,35 @@ async fn check_ws(socket_addr: std::net::SocketAddr, use_tls: bool) -> PeerStatu
 
     let request = match url.clone().into_client_request() {
         Ok(r) => r,
-        Err(e) => return PeerStatus::Offline { error: format!("Ошибка URL: {}", e) },
+        Err(e) => {
+            return PeerStatus::Offline {
+                error: format!("Ошибка URL: {}", e),
+            }
+        }
     };
 
     let timeout = tokio::time::Duration::from_secs(3);
 
     if use_tls {
-        use tokio_rustls::rustls::{ClientConfig, RootCertStore};
-        use std::sync::Arc;
+        let connector = tokio_tungstenite::Connector::Rustls(wss_tls_config().clone());
 
-        let mut root_store = RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-
-        let tls_config = ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
-            .with_no_client_auth();
-
-        let connector = Connector::Rustls(Arc::new(tls_config));
-
-        let connect_fut = tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector));
+        let connect_fut =
+            tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector));
         let result = tokio::time::timeout(timeout, connect_fut).await;
 
         let ping_ms = start.elapsed().as_millis();
 
         match result {
-            Ok(Ok((_, _response))) => PeerStatus::Online { ping_ms, speed_mbps: 0.0 },
-            Ok(Err(e)) => PeerStatus::Offline { error: format!("WS ошибка: {}", e) },
-            Err(_) => PeerStatus::Offline { error: "Таймаут WS подключения".to_string() },
+            Ok(Ok((_, _response))) => PeerStatus::Online {
+                ping_ms,
+                speed_mbps: 0.0,
+            },
+            Ok(Err(e)) => PeerStatus::Offline {
+                error: format!("WS ошибка: {}", e),
+            },
+            Err(_) => PeerStatus::Offline {
+                error: "Таймаут WS подключения".to_string(),
+            },
         }
     } else {
         let connect_fut = tokio_tungstenite::connect_async(request);
@@ -701,9 +941,16 @@ async fn check_ws(socket_addr: std::net::SocketAddr, use_tls: bool) -> PeerStatu
         let ping_ms = start.elapsed().as_millis();
 
         match result {
-            Ok(Ok((_, _response))) => PeerStatus::Online { ping_ms, speed_mbps: 0.0 },
-            Ok(Err(e)) => PeerStatus::Offline { error: format!("WS ошибка: {}", e) },
-            Err(_) => PeerStatus::Offline { error: "Таймаут WS подключения".to_string() },
+            Ok(Ok((_, _response))) => PeerStatus::Online {
+                ping_ms,
+                speed_mbps: 0.0,
+            },
+            Ok(Err(e)) => PeerStatus::Offline {
+                error: format!("WS ошибка: {}", e),
+            },
+            Err(_) => PeerStatus::Offline {
+                error: "Таймаут WS подключения".to_string(),
+            },
         }
     }
 }
@@ -747,12 +994,10 @@ async fn check_quic(socket_addr: std::net::SocketAddr) -> PeerStatus {
     let ping_ms = start.elapsed().as_millis();
 
     match result {
-        Ok(Ok(_connection)) => {
-            PeerStatus::Online {
-                ping_ms,
-                speed_mbps: 0.0,
-            }
-        }
+        Ok(Ok(_connection)) => PeerStatus::Online {
+            ping_ms,
+            speed_mbps: 0.0,
+        },
         Ok(Err(e)) => PeerStatus::Offline {
             error: format!("QUIC ошибка: {}", e),
         },
@@ -764,18 +1009,12 @@ async fn check_quic(socket_addr: std::net::SocketAddr) -> PeerStatus {
 
 fn make_quic_client_config(
 ) -> Result<(quinn::ClientConfig, quinn::Endpoint), Box<dyn std::error::Error>> {
-    use std::sync::Arc;
-
-    let rcgen::CertifiedKey { cert, key_pair } =
+    let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(vec!["example.com".to_string()])?;
 
-    let client_cert: rustls::pki_types::CertificateDer =
-        cert.der().as_ref().to_vec().into();
-    let priv_key = key_pair.serialize_der();
+    let client_cert: rustls::pki_types::CertificateDer = cert.der().as_ref().to_vec().into();
+    let priv_key = signing_key.serialize_der();
     let client_key = rustls::pki_types::PrivateKeyDer::try_from(priv_key)?;
-
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.add(client_cert.clone())?;
 
     let crypto = rustls::ClientConfig::builder()
         .dangerous()
