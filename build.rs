@@ -102,7 +102,7 @@ fn generate_bmp_image(size: u32) -> Vec<u8> {
                         break;
                     }
                 }
-                let idx = (y * s as i32 + x) as usize;
+                let idx = (y * s + x) as usize;
                 if is_node {
                     pixels[idx] = (255, 255, 255, 255); // White
                 } else {
@@ -123,8 +123,8 @@ fn generate_bmp_image(size: u32) -> Vec<u8> {
         let mut err = dx - dy;
         let (mut mx, mut my) = (x1, y1);
         loop {
-            if mx >= 0 && mx < s as i32 && my >= 0 && my < s as i32 {
-                let idx = (my * s as i32 + mx) as usize;
+            if mx >= 0 && mx < s && my >= 0 && my < s {
+                let idx = (my * s + mx) as usize;
                 pixels[idx] = (255, 255, 255, 255);
             }
             if mx == x2 && my == y2 {
@@ -163,7 +163,7 @@ fn generate_bmp_image(size: u32) -> Vec<u8> {
     // XOR mask: bottom-up rows
     for y in (0..size as i32).rev() {
         for x in 0..size as i32 {
-            let (b, g, r, a) = pixels[(y * s as i32 + x) as usize];
+            let (b, g, r, a) = pixels[(y * s + x) as usize];
             bmp.write_all(&[b, g, r, a]).unwrap();
         }
     }

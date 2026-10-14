@@ -85,10 +85,9 @@ impl Peer {
             (Protocol::Socks, addr)
         } else if let Some(addr) = raw.strip_prefix("sockstls://") {
             (Protocol::SocksTls, addr)
-        } else if let Some(addr) = raw.strip_prefix("unix://") {
-            (Protocol::Unix, addr)
         } else {
-            return None;
+            let addr = raw.strip_prefix("unix://")?;
+            (Protocol::Unix, addr)
         };
 
         let (protocol, rest) = protocol;
@@ -119,7 +118,7 @@ impl Peer {
     }
 
     fn socket_addr(&self) -> Option<std::net::SocketAddr> {
-        let addr_str = self.address.replace('[', "").replace(']', "");
+        let addr_str = self.address.replace(['[', ']'], "");
         format!("{}:{}", addr_str, self.port)
             .parse()
             .ok()
@@ -254,7 +253,7 @@ fn save_peers_to_file(peers: &[PeerEntry]) -> Result<(), String> {
 fn load_peers_from_file() -> Result<Vec<Peer>, String> {
     let path = config_path();
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    Ok(content.lines().filter_map(|line| Peer::parse(line)).collect())
+    Ok(content.lines().filter_map(Peer::parse).collect())
 }
 
 // ── Приложение ──────────────────────────────────────────────────────────
@@ -766,7 +765,7 @@ async fn check_peer(peer: &Peer) -> PeerStatus {
         Some(addr) => addr,
         None => {
             // Resolve hostname via DNS
-            let addr_str = peer.address.replace('[', "").replace(']', "");
+            let addr_str = peer.address.replace(['[', ']'], "");
             let host_port = format!("{}:{}", addr_str, peer.port);
             let resolved = tokio::time::timeout(
                 tokio::time::Duration::from_secs(3),
@@ -805,8 +804,8 @@ async fn check_peer(peer: &Peer) -> PeerStatus {
         Protocol::Quic => check_quic(socket_addr, &sni_name).await,
         Protocol::Ws => check_ws(socket_addr, &sni_name, false).await,
         Protocol::Wss => check_ws(socket_addr, &sni_name, true).await,
-        Protocol::Socks => check_socks(&peer, false).await,
-        Protocol::SocksTls => check_socks(&peer, true).await,
+        Protocol::Socks => check_socks(peer, false).await,
+        Protocol::SocksTls => check_socks(peer, true).await,
         Protocol::Unix => PeerStatus::Offline {
             error: "UNIX сокеты не поддерживаются на Windows".to_string(),
         },
