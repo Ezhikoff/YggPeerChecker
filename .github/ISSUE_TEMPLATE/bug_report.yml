@@ -1,0 +1,36 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1. Open app
+        2. Add peer: `tcp://...`
+        3. Click "Проверить все"
+        4. See error: ...
+    validations:
+      required: true
+  - type: dropdown
+    attributes:
+      label: OS
+      options:
+        - Windows
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Version
+      description: Which version of YggPeerChecker?
+      placeholder: v0.2.0
+    validations:
+      required: true

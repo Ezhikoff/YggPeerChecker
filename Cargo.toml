@@ -3,6 +3,7 @@ name = "ygg-peer-checker"
 version = "0.2.0"
 edition = "2021"
 description = "GUI utility for checking Yggdrasil Network peers"
+license = "MIT"
 
 [package.metadata.deb]
 maintainer = "mike"
