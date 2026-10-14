@@ -1,5 +1,6 @@
 # YggPeerChecker
 
+[![Rust](https://github.com/Ezhikoff/YggPeerChecker/actions/workflows/rust.yml/badge.svg)](https://github.com/Ezhikoff/YggPeerChecker/actions/workflows/rust.yml)
 [![GitHub tag](https://img.shields.io/github/v/tag/Ezhikoff/YggPeerChecker.svg?label=latest%20tag)](https://github.com/Ezhikoff/YggPeerChecker/tags)
 [![License](https://img.shields.io/github/license/Ezhikoff/YggPeerChecker.svg)](https://github.com/Ezhikoff/YggPeerChecker/blob/main/LICENSE)
 
