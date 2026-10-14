@@ -23,7 +23,7 @@ assets = [
 ]
 license = "MIT"
 
-[target.'cfg(windows)'.build-dependencies]
+[build-dependencies]
 winresource = "0.1"
 
 [dependencies]

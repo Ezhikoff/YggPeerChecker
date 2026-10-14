@@ -1,26 +1,21 @@
-//! Build script — embeds application icon on Windows
+//! Build script — embeds application icon on Windows (including cross-compilation)
 use std::io::Write;
 
-#[cfg(windows)]
 fn main() {
-    // Generate ICO file with multiple sizes and embed it
-    let icon_dir = generate_ico();
-    std::fs::write("app.ico", &icon_dir).expect("Failed to write app.ico");
-
-    let mut res = winresource::WindowsResource::new();
-    res.set_icon("app.ico");
-    res.set("LegalCopyright", "MIT License");
-    res.set("FileDescription", "YggPeerChecker - Yggdrasil Peer Checker");
-    res.set("ProductName", "YggPeerChecker");
-    res.compile().expect("Failed to compile resources");
-}
-
-#[cfg(not(windows))]
-fn main() {
-    // On non-Windows, just generate the ICO file for reference
     let icon_data = generate_ico();
     std::fs::write("app.ico", &icon_data).expect("Failed to write app.ico");
     println!("cargo:rerun-if-changed=build.rs");
+
+    // Detect target OS (not host OS) — works for cross-compilation
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "windows" {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("app.ico");
+        res.set("LegalCopyright", "MIT License");
+        res.set("FileDescription", "YggPeerChecker - Yggdrasil Peer Checker");
+        res.set("ProductName", "YggPeerChecker");
+        res.compile().expect("Failed to compile resources");
+    }
 }
 
 fn generate_ico() -> Vec<u8> {
