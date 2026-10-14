@@ -2,6 +2,7 @@
 name = "ygg-peer-checker"
 version = "0.2.0"
 edition = "2021"
+description = "GUI utility for checking Yggdrasil Network peers"
 
 [package.metadata.deb]
 maintainer = "mike"
@@ -14,6 +15,13 @@ assets = [
     ["target/release/ygg-peer-checker", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ygg-peer-checker/README", "644"],
 ]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/ygg-peer-checker", dest = "/usr/bin/ygg-peer-checker", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/ygg-peer-checker/README.md", mode = "644" },
+]
+license = "MIT"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
