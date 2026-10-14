@@ -765,18 +765,46 @@ async fn check_peer(peer: &Peer) -> PeerStatus {
     let socket_addr = match peer.socket_addr() {
         Some(addr) => addr,
         None => {
-            return PeerStatus::Offline {
-                error: "Неверный адрес".to_string(),
+            // Resolve hostname via DNS
+            let addr_str = peer.address.replace('[', "").replace(']', "");
+            let host_port = format!("{}:{}", addr_str, peer.port);
+            let resolved = tokio::time::timeout(
+                tokio::time::Duration::from_secs(3),
+                tokio::net::lookup_host(host_port.as_str()),
+            )
+            .await;
+            match resolved {
+                Ok(Ok(addrs)) => match addrs.into_iter().next() {
+                    Some(addr) => addr,
+                    None => {
+                        return PeerStatus::Offline {
+                            error: "DNS: не найдено записей".to_string(),
+                        }
+                    }
+                },
+                Ok(Err(e)) => {
+                    return PeerStatus::Offline {
+                        error: format!("DNS ошибка: {}", e),
+                    }
+                }
+                Err(_) => {
+                    return PeerStatus::Offline {
+                        error: "DNS таймаут".to_string(),
+                    }
+                }
             }
         }
     };
 
+    // SNI name: use hostname or IP as-is (rustls handles both)
+    let sni_name = peer.address.replace(['[', ']'], "");
+
     match peer.protocol {
         Protocol::Tcp => check_tcp(socket_addr).await,
-        Protocol::Tls => check_tls(socket_addr).await,
-        Protocol::Quic => check_quic(socket_addr).await,
-        Protocol::Ws => check_ws(socket_addr, false).await,
-        Protocol::Wss => check_ws(socket_addr, true).await,
+        Protocol::Tls => check_tls(socket_addr, &sni_name).await,
+        Protocol::Quic => check_quic(socket_addr, &sni_name).await,
+        Protocol::Ws => check_ws(socket_addr, &sni_name, false).await,
+        Protocol::Wss => check_ws(socket_addr, &sni_name, true).await,
         Protocol::Socks => check_socks(&peer, false).await,
         Protocol::SocksTls => check_socks(&peer, true).await,
         Protocol::Unix => PeerStatus::Offline {
@@ -846,7 +874,7 @@ async fn measure_speed_tcp(socket_addr: std::net::SocketAddr) -> f64 {
 
 // ── TLS проверка ──────────────────────────────────────────────────────
 
-async fn check_tls(socket_addr: std::net::SocketAddr) -> PeerStatus {
+async fn check_tls(socket_addr: std::net::SocketAddr, sni_name: &str) -> PeerStatus {
     let start = std::time::Instant::now();
 
     let connector = tls_connector().clone();
@@ -865,8 +893,7 @@ async fn check_tls(socket_addr: std::net::SocketAddr) -> PeerStatus {
         }
     };
 
-    let domain = socket_addr.ip().to_string();
-    let dns_name = match rustls::pki_types::ServerName::try_from(domain) {
+    let dns_name = match rustls::pki_types::ServerName::try_from(sni_name.to_string()) {
         Ok(n) => n,
         Err(_) => {
             return PeerStatus::Offline {
@@ -895,12 +922,12 @@ async fn check_tls(socket_addr: std::net::SocketAddr) -> PeerStatus {
 
 // ── WebSocket / WSS проверка ──────────────────────────────────────────
 
-async fn check_ws(socket_addr: std::net::SocketAddr, use_tls: bool) -> PeerStatus {
+async fn check_ws(socket_addr: std::net::SocketAddr, sni_name: &str, use_tls: bool) -> PeerStatus {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let start = std::time::Instant::now();
     let scheme = if use_tls { "wss" } else { "ws" };
-    let url = format!("{}://{}/", scheme, socket_addr);
+    let url = format!("{}://{}:{}/", scheme, sni_name, socket_addr.port());
 
     let request = match url.clone().into_client_request() {
         Ok(r) => r,
@@ -965,9 +992,9 @@ async fn check_socks(_peer: &Peer, _use_tls: bool) -> PeerStatus {
     }
 }
 
-async fn check_quic(socket_addr: std::net::SocketAddr) -> PeerStatus {
+async fn check_quic(socket_addr: std::net::SocketAddr, sni_name: &str) -> PeerStatus {
     let start = std::time::Instant::now();
-    let server_name = "example.com";
+    let server_name = sni_name;
 
     // Извлекаем endpoint до await, чтобы избежать проблемы Send
     let endpoint = match make_quic_client_config() {
